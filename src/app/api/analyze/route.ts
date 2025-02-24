@@ -213,185 +213,16 @@ Focus on last 30 days impact on market outcome.`
 
 async function fetchRedditPosts(market: Market) {
   try {
-    // Déterminer si c'est un marché binaire (YES/NO) ou à choix multiples
-    const isBinaryMarket = market.outcomes.length === 2 && 
-      market.outcomes.every(o => ['YES', 'NO', 'yes', 'no'].includes(o.title.toLowerCase()));
-
-    // Détecter si c'est un marché d'awards/récompenses
-    const isAwardsMarket = market.title.toLowerCase().includes('oscar') || 
-      market.title.toLowerCase().includes('award') ||
-      market.title.toLowerCase().includes('emmy') ||
-      market.title.toLowerCase().includes('grammy');
-
-    if (isBinaryMarket) {
-      // Logique originale pour les marchés binaires
-      const redditService = RedditService.getInstance();
-      const searchQuery = market.title;
-      const posts = await redditService.searchPosts(searchQuery, 10);
-
-      // Analyser le sentiment et la pertinence des posts
-      const analyzedPosts = await Promise.all(posts.map(async (post) => {
-        try {
-          const response = await openai.chat.completions.create({
-            model: "sonar-pro",
-            messages: [
-              {
-                role: "system",
-                content: `Analyze this Reddit post's sentiment regarding the prediction market question: "${market.title}".
-                Return ONLY a JSON object with this structure:
-                {
-                  "sentiment": "BULLISH" | "BEARISH" | "NEUTRAL",
-                  "relevance": "HIGH" | "MEDIUM" | "LOW",
-                  "keyPoints": "Brief summary of main points"
-                }
-                
-                When analyzing sentiment:
-                - BULLISH: Post suggests positive outcome or increased probability
-                - BEARISH: Post suggests negative outcome or decreased probability
-                - NEUTRAL: Post has balanced or unclear sentiment`
-              },
-              {
-                role: "user",
-                content: `Post Title: ${post.title}\nSubreddit: ${post.subreddit}`
-              }
-            ],
-            temperature: 0.3,
-            max_tokens: 150,
-            response_format: { type: "json_object" }
-          });
-
-          const analysis = JSON.parse(response.choices[0]?.message?.content || '{}');
-          
-          return {
-            ...post,
-            sentiment: analysis.sentiment || 'NEUTRAL',
-            keyComments: analysis.keyPoints || ''
-          };
-        } catch (error) {
-          console.error('Error analyzing Reddit post:', error);
-          return post;
-        }
-      }));
-
-      // Filtrer et trier les posts par pertinence et upvotes
-      return analyzedPosts
-        .sort((a, b) => b.upvotes - a.upvotes)
-        .slice(0, 5);
-    } else {
-      // Logique améliorée pour les marchés non binaires
-      // Utiliser l'IA pour générer une stratégie de recherche adaptée
-      const searchStrategyResponse = await openai.chat.completions.create({
-        model: "sonar-pro",
-        messages: [
-          {
-            role: "system",
-            content: `You are a search expert specializing in prediction markets. Generate a focused search strategy.
-            
-            For awards markets (Oscars, etc):
-            - Use the exact award category and year in keywords
-            - Include all nominees/candidates in search queries
-            
-            Return ONLY a JSON object with this structure:
-            {
-              "keywords": ["specific search terms combining year + category + nominees"],
-              "subreddits": ["relevant subreddit names without 'r/' prefix - up to 5"],
-              "searchQueries": ["2-3 search queries using keywords and outcomes"],
-              "outcomes": ${JSON.stringify(market.outcomes.map(o => o.title))},
-              "relevantTopics": ["directly related events/topics"]
-            }`
-          },
-          {
-            role: "user",
-            content: `Generate a focused search strategy for this market:
-            Title: ${market.title}
-            Description: ${market.description}
-            Type: Multiple Choice
-            Outcomes: ${market.outcomes.map(o => o.title).join(', ')}
-            
-            ${isAwardsMarket ? 'This is an awards prediction - focus on the specific category, year, and nominees.' : ''}`
-          }
-        ],
-        temperature: 0.3,
-        max_tokens: 1000,
-        response_format: { type: "json_object" }
-      });
-
-      const searchStrategy = JSON.parse(searchStrategyResponse.choices[0]?.message?.content || '{}');
-      console.log('Generated search strategy:', searchStrategy);
-
-      const redditService = RedditService.getInstance();
-      let allPosts: RedditPost[] = [];
-
-      // Rechercher dans les subreddits spécifiques
-      for (const subreddit of searchStrategy.subreddits || []) {
-        for (const query of searchStrategy.searchQueries || []) {
-          const subredditPosts = await redditService.searchPosts(
-            `subreddit:${subreddit} ${query}`,
-            5
-          );
-          allPosts = [...allPosts, ...subredditPosts];
-        }
-      }
-
-      // Recherche générale avec les requêtes optimisées
-      for (const query of searchStrategy.searchQueries || []) {
-        const generalPosts = await redditService.searchPosts(query, 5);
-        allPosts = [...allPosts, ...generalPosts];
-      }
-
-      // Dédupliquer les posts par URL
-      const uniquePosts = Array.from(
-        new Map(allPosts.map(post => [post.url, post])).values()
-      );
-
-      // Analyser la pertinence et le contenu des posts
-      const analyzedPosts = await Promise.all(uniquePosts.map(async (post) => {
-        try {
-          const response = await openai.chat.completions.create({
-            model: "sonar-pro",
-            messages: [
-              {
-                role: "system",
-                content: `Analyze this Reddit post's relevance to the prediction market.
-                Possible outcomes: ${market.outcomes.map(o => o.title).join(', ')}
-                
-                Return ONLY a JSON object with this structure:
-                {
-                  "favoredOutcome": "string (must be one of: ${market.outcomes.map(o => o.title).join(', ')} or UNDECIDED)",
-                  "confidence": "HIGH" | "MEDIUM" | "LOW",
-                  "keyPoints": "Brief summary of main points"
-                }`
-              },
-              {
-                role: "user",
-                content: `Market: ${market.title}
-                Reddit Post Title: ${post.title}
-                Subreddit: ${post.subreddit}`
-              }
-            ],
-            temperature: 0.3,
-            max_tokens: 150,
-            response_format: { type: "json_object" }
-          });
-
-          const analysis = JSON.parse(response.choices[0]?.message?.content || '{}');
-          
-          return {
-            ...post,
-            sentiment: analysis.favoredOutcome || 'UNDECIDED',
-            keyComments: analysis.keyPoints || ''
-          };
-        } catch (error) {
-          console.error('Error analyzing Reddit post:', error);
-          return post;
-        }
-      }));
-
-      // Trier par nombre d'upvotes et limiter à 5 posts
-      return analyzedPosts
-        .sort((a, b) => b.upvotes - a.upvotes)
-        .slice(0, 5);
+    const response = await fetch(`${process.env.VERCEL_URL || 'http://localhost:3000'}/api/reddit?query=${encodeURIComponent(market.title)}&limit=10`);
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch Reddit posts');
     }
+
+    const data = await response.json();
+    console.log('Reddit posts fetched:', data.posts);
+    
+    return data.posts || [];
   } catch (error) {
     console.error('Error fetching Reddit posts:', error);
     return [];
@@ -400,109 +231,152 @@ async function fetchRedditPosts(market: Market) {
 
 async function generateBullishBearishAnalysis(market: Market, articles: RelatedArticle[], redditPosts: RedditPost[]) {
   try {
-    console.log('Generating bullish/bearish analysis and what-if scenarios...');
+    console.log('Generating AI analysis...');
     const response = await openai.chat.completions.create({
       model: "sonar-pro",
       messages: [
         {
           role: "system",
-          content: `You are a JSON generator. Return ONLY a JSON object with this exact structure, no other text:
+          content: `You are a prediction market analyst. Analyze the market data, articles, and Reddit posts to generate a detailed analysis.
+Return ONLY a JSON object with this exact structure:
 {
-  "bullishArguments": ["string", "string"],
-  "bearishArguments": ["string", "string"],
+  "bullishArguments": ["Detailed argument based on specific evidence", "Another specific argument"],
+  "bearishArguments": ["Detailed counter-argument based on specific evidence", "Another specific argument"],
   "confidence": "HIGH" | "MEDIUM" | "LOW",
   "whatIfScenarios": {
     "positiveScenario": {
-      "title": "string",
-      "implications": ["string"],
-      "probability": number
+      "title": "If YES wins...",
+      "implications": ["Specific market implication", "Another specific implication"],
+      "probability": 0.5
     },
     "negativeScenario": {
-      "title": "string",
-      "implications": ["string"],
-      "probability": number
+      "title": "If NO wins...",
+      "implications": ["Specific market implication", "Another specific implication"],
+      "probability": 0.5
     }
   }
 }`
         },
         {
           role: "user",
-          content: `Analyze this market and return a JSON object:
+          content: `Analyze this prediction market:
 Title: ${market.title}
 Description: ${market.description}
-Articles: ${articles.map(a => a.title).join(', ')}
-Reddit: ${redditPosts.map(p => p.title).join(', ')}`
+Current Probabilities: ${market.outcomes.map(o => `${o.title}: ${(o.probability * 100).toFixed(1)}%`).join(', ')}
+
+Recent Articles:
+${articles.map(a => `- ${a.title} (Impact: ${a.marketImpact}, Score: ${a.relevanceScore})
+  Summary: ${a.summary}`).join('\n')}
+
+Reddit Discussion:
+${redditPosts.map(p => `- ${p.title} (${p.sentiment}, ${p.upvotes} upvotes)
+  Key Points: ${p.keyComments}`).join('\n')}
+
+Generate a detailed analysis focusing on specific evidence from the articles and Reddit posts.`
         }
       ],
-      temperature: 0.1, // Réduire la température pour plus de cohérence
+      temperature: 0.1,
       max_tokens: 1000,
       response_format: { type: "json_object" }
     });
 
     const content = response.choices[0]?.message?.content;
     if (!content) {
-      throw new Error('Empty response from API');
+      throw new Error('Empty response from AI');
     }
 
-    console.log('Raw analysis response:', content);
+    console.log('Raw AI analysis:', content);
+    const analysis = JSON.parse(content);
 
-    // Essayer de trouver et parser le JSON même s'il y a du texte autour
-    let jsonContent = content;
-    const jsonStart = content.indexOf('{');
-    const jsonEnd = content.lastIndexOf('}') + 1;
-    
-    if (jsonStart !== -1 && jsonEnd > jsonStart) {
-      jsonContent = content.substring(jsonStart, jsonEnd);
+    // Valider la structure de la réponse
+    if (!analysis.bullishArguments || !analysis.bearishArguments || !analysis.confidence || !analysis.whatIfScenarios) {
+      throw new Error('Invalid AI response structure');
     }
 
-    try {
-      const analysis = JSON.parse(jsonContent);
-      
-      // Valider la structure
-      if (!analysis.bullishArguments || !analysis.bearishArguments) {
-        throw new Error('Invalid analysis structure');
-      }
+    // Valider et corriger le niveau de confiance
+    const validConfidence = analysis.confidence === 'HIGH' || analysis.confidence === 'MEDIUM' || analysis.confidence === 'LOW' 
+      ? analysis.confidence 
+      : 'MEDIUM';
 
-      return {
-        bullishArguments: analysis.bullishArguments,
-        bearishArguments: analysis.bearishArguments,
-        confidence: analysis.confidence || 'MEDIUM',
-        lastUpdated: new Date().toISOString(),
-        whatIfScenarios: analysis.whatIfScenarios || {
-          positiveScenario: {
-            title: "If YES wins...",
-            implications: ["Market confidence will increase"],
-            probability: 0.5
-          },
-          negativeScenario: {
-            title: "If NO wins...",
-            implications: ["Market uncertainty may rise"],
-            probability: 0.5
-          }
-        }
-      };
-    } catch (parseError) {
-      console.error('Error parsing analysis:', parseError, 'Content:', jsonContent);
-      throw new Error('Failed to parse analysis response');
-    }
-  } catch (error) {
-    console.error('Error generating analysis:', error);
-    // Retourner une analyse par défaut en cas d'erreur
+    // Ajuster les probabilités des scénarios avec les données réelles du marché
+    const yesOutcome = market.outcomes.find(o => o.title.toLowerCase() === 'yes') || market.outcomes[0];
+    const noOutcome = market.outcomes.find(o => o.title.toLowerCase() === 'no') || market.outcomes[1];
+
     return {
-      bullishArguments: ["Recent developments support a YES outcome"],
-      bearishArguments: ["Some uncertainty remains in the market"],
-      confidence: 'MEDIUM',
+      bullishArguments: analysis.bullishArguments,
+      bearishArguments: analysis.bearishArguments,
+      confidence: validConfidence as 'HIGH' | 'MEDIUM' | 'LOW',
       lastUpdated: new Date().toISOString(),
       whatIfScenarios: {
         positiveScenario: {
-          title: "If YES wins...",
-          implications: ["Market confidence will increase"],
-          probability: 0.5
+          title: `If ${yesOutcome.title} wins...`,
+          implications: analysis.whatIfScenarios.positiveScenario.implications,
+          probability: yesOutcome.probability
         },
         negativeScenario: {
-          title: "If NO wins...",
-          implications: ["Market uncertainty may rise"],
-          probability: 0.5
+          title: `If ${noOutcome.title} wins...`,
+          implications: analysis.whatIfScenarios.negativeScenario.implications,
+          probability: noOutcome.probability
+        }
+      }
+    };
+  } catch (error) {
+    console.error('Error in AI analysis generation:', error);
+    // Fallback à l'analyse basée sur les données disponibles
+    const bullishArticles = articles.filter(a => a.marketImpact === 'BULLISH');
+    const bearishArticles = articles.filter(a => a.marketImpact === 'BEARISH');
+    const bullishPosts = redditPosts.filter(p => p.sentiment === 'BULLISH');
+    const bearishPosts = redditPosts.filter(p => p.sentiment === 'BEARISH');
+
+    const bullishArguments = [
+      ...bullishArticles.map(a => `${a.title}: ${a.summary}`),
+      ...bullishPosts.map(p => `Reddit discussion shows support: ${p.title}`)
+    ];
+
+    const bearishArguments = [
+      ...bearishArticles.map(a => `${a.title}: ${a.summary}`),
+      ...bearishPosts.map(p => `Reddit discussion raises concerns: ${p.title}`)
+    ];
+
+    if (bullishArguments.length === 0) {
+      bullishArguments.push(
+        `Market shows significant trading volume of $${market.volume.toLocaleString()}`,
+        `Current probability suggests balanced sentiment`
+      );
+    }
+
+    if (bearishArguments.length === 0) {
+      bearishArguments.push(
+        `Market uncertainty reflected in trading patterns`,
+        `Current market conditions indicate mixed views`
+      );
+    }
+
+    const confidence: 'HIGH' | 'MEDIUM' | 'LOW' = articles.length > 2 ? 'HIGH' : articles.length > 0 ? 'MEDIUM' : 'LOW';
+    const yesOutcome = market.outcomes.find(o => o.title.toLowerCase() === 'yes') || market.outcomes[0];
+    const noOutcome = market.outcomes.find(o => o.title.toLowerCase() === 'no') || market.outcomes[1];
+
+    return {
+      bullishArguments: bullishArguments.slice(0, 3),
+      bearishArguments: bearishArguments.slice(0, 3),
+      confidence,
+      lastUpdated: new Date().toISOString(),
+      whatIfScenarios: {
+        positiveScenario: {
+          title: `If ${yesOutcome.title} wins...`,
+          implications: [
+            `Market confidence in ${yesOutcome.title} outcome will be validated`,
+            `Trading volume of $${yesOutcome.volume.toLocaleString()} indicates strong interest`
+          ],
+          probability: yesOutcome.probability
+        },
+        negativeScenario: {
+          title: `If ${noOutcome.title} wins...`,
+          implications: [
+            `Market sentiment for ${noOutcome.title} outcome will be confirmed`,
+            `Current liquidity of $${market.liquidity.toLocaleString()} shows significant market participation`
+          ],
+          probability: noOutcome.probability
         }
       }
     };

@@ -8,7 +8,7 @@ import { MarketService } from '@/lib/services/market-service';
 // Augmenter la limite de temps à 60 secondes
 export const maxDuration = 60;
 
-// Configurer pour utiliser Edge Runtime
+// Configurer pour utiliser Edge Runtime avec des timeouts plus courts
 export const runtime = 'edge';
 
 const openai = new OpenAI({
@@ -19,7 +19,7 @@ const openai = new OpenAI({
     'Content-Type': 'application/json'
   },
   dangerouslyAllowBrowser: true,
-  timeout: 30000
+  timeout: 25000 // Réduire le timeout à 25 secondes
 });
 
 interface Analysis {
@@ -46,6 +46,14 @@ function extractSlugFromUrl(url: string): string | null {
   }
 }
 
+// Ajouter un timeout pour les promesses
+const withTimeout = (promise: Promise<any>, ms: number) => {
+  const timeout = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('Request timeout')), ms);
+  });
+  return Promise.race([promise, timeout]);
+};
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -70,21 +78,21 @@ export async function POST(request: Request) {
 
     const marketService = MarketService.getInstance();
     console.log('Fetching market data...');
-    const market = await marketService.getMarketBySlug(slug);
+    const market = await withTimeout(marketService.getMarketBySlug(slug), 10000);
     console.log('Market data received:', market);
 
-    // Récupérer les articles en parallèle avec les posts Reddit
+    // Récupérer les articles en parallèle avec les posts Reddit avec timeout
     console.log('Starting parallel fetches for articles and Reddit posts...');
     try {
       const [articles, redditPosts] = await Promise.all([
-        fetchRelatedArticles(market).catch(error => {
+        withTimeout(fetchRelatedArticles(market).catch(error => {
           console.error('Error fetching articles:', error);
           return [];
-        }),
-        fetchRedditPosts(market).catch(error => {
+        }), 20000),
+        withTimeout(fetchRedditPosts(market).catch(error => {
           console.error('Error fetching Reddit posts:', error);
           return [];
-        })
+        }), 20000)
       ]);
 
       console.log('Articles fetched:', articles.length);
@@ -148,35 +156,26 @@ async function fetchRelatedArticles(market: Market) {
       messages: [
         {
           role: "system",
-          content: `You are a JSON generator that finds and analyzes news articles. You must ONLY return a JSON array of articles, with no additional text or explanation.
-
-The response must be EXACTLY in this format, with no text before or after:
-[
-  {
-    "title": "Article title",
-    "url": "Full URL",
-    "source": "Publication name",
-    "publishDate": "YYYY-MM-DD",
-    "relevanceScore": 0.0-1.0,
-    "summary": "2-3 sentence summary",
-    "marketImpact": "BULLISH/BEARISH/NEUTRAL"
-  }
-]`
+          content: `Return a JSON array of 3 most relevant recent news articles. Format:
+[{
+  "title": "string",
+  "url": "string",
+  "source": "string",
+  "publishDate": "YYYY-MM-DD",
+  "relevanceScore": 0.0-1.0,
+  "summary": "string",
+  "marketImpact": "BULLISH/BEARISH/NEUTRAL"
+}]`
         },
         {
           role: "user",
-          content: `Find relevant articles for this market:
-"${market.title}"
-
+          content: `Find top 3 relevant articles for: "${market.title}"
 Description: ${market.description}
-Resolution: ${market.resolutionSource || 'Not specified'}
-Outcomes: ${market.outcomes.map(o => o.title).join(', ')}
-
-Focus on articles from the last 30 days that could impact the market outcome.`
+Focus on last 30 days impact on market outcome.`
         }
       ],
       temperature: 0.1,
-      max_tokens: 4000,
+      max_tokens: 2000,
       response_format: { type: "json_object" }
     });
 
@@ -187,29 +186,11 @@ Focus on articles from the last 30 days that could impact the market outcome.`
       return [];
     }
 
-    console.log('Response content:', content);
-
     try {
-      // Nettoyer la réponse de tout texte superflu
-      let jsonContent = content.trim();
-      
-      // Si la réponse commence par du texte, trouver le début du JSON
-      const jsonStart = jsonContent.indexOf('[');
-      if (jsonStart !== -1) {
-        jsonContent = jsonContent.substring(jsonStart);
-      }
-      
-      // Si la réponse contient du texte après le JSON, le retirer
-      const jsonEnd = jsonContent.lastIndexOf(']');
-      if (jsonEnd !== -1) {
-        jsonContent = jsonContent.substring(0, jsonEnd + 1);
-      }
-
-      // Vérifier que nous avons un JSON valide
-      if (!jsonContent.startsWith('[') || !jsonContent.endsWith(']')) {
-        console.error('Invalid JSON format received:', jsonContent);
-        return [];
-      }
+      // Nettoyer et parser la réponse
+      const jsonContent = content.trim()
+        .replace(/^[^[]*\[/, '[')  // Retirer tout ce qui précède le premier '['
+        .replace(/][^]]*$/, ']');  // Retirer tout ce qui suit le dernier ']'
 
       const articles = JSON.parse(jsonContent);
       
@@ -219,40 +200,9 @@ Focus on articles from the last 30 days that could impact the market outcome.`
       }
 
       console.log('Successfully parsed articles:', articles.length);
-
-      // Filtrer les articles non pertinents avec des seuils adaptés au type de marché
-      const relevanceThreshold = market.title.toLowerCase().includes('oscar') || 
-        market.title.toLowerCase().includes('award') ||
-        market.title.toLowerCase().includes('emmy') ||
-        market.title.toLowerCase().includes('grammy') ? 0.5 : 0.6;
-      const filteredArticles = articles.filter(article => 
-        article.relevanceScore >= relevanceThreshold && // Score de pertinence minimum
-        new Date(article.publishDate) >= new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) // 30 derniers jours
-      );
-
-      // Trier les articles par pertinence et date
-      const sortedArticles = filteredArticles.sort((a, b) => {
-        // Ajuster les poids en fonction du type de marché
-        const recencyWeight = market.title.toLowerCase().includes('oscar') || 
-          market.title.toLowerCase().includes('award') ||
-          market.title.toLowerCase().includes('emmy') ||
-          market.title.toLowerCase().includes('grammy') ? 0.4 : 0.3;
-        const relevanceWeight = 1 - recencyWeight;
-
-        const aScore = a.relevanceScore * relevanceWeight + 
-          (1 - (Date.now() - new Date(a.publishDate).getTime()) / (30 * 24 * 60 * 60 * 1000)) * recencyWeight;
-        const bScore = b.relevanceScore * relevanceWeight + 
-          (1 - (Date.now() - new Date(b.publishDate).getTime()) / (30 * 24 * 60 * 60 * 1000)) * recencyWeight;
-        return bScore - aScore;
-      });
-
-      // Limiter à 5 articles les plus pertinents
-      return sortedArticles.slice(0, 5);
+      return articles;
     } catch (parseError) {
-      console.error('Error parsing API response:', {
-        error: parseError,
-        content: content
-      });
+      console.error('Error parsing API response:', parseError);
       return [];
     }
   } catch (error) {

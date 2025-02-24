@@ -148,18 +148,20 @@ async function fetchRelatedArticles(market: Market) {
       messages: [
         {
           role: "system",
-          content: `You are a news search and analysis expert. Find and analyze recent news articles related to this prediction market question. Return your findings as a JSON array of articles.
+          content: `You are a JSON generator that finds and analyzes news articles. You must ONLY return a JSON array of articles, with no additional text or explanation.
 
-Format each article as:
-{
-  "title": "Article title",
-  "url": "Full URL",
-  "source": "Publication name",
-  "publishDate": "YYYY-MM-DD",
-  "relevanceScore": 0.0-1.0,
-  "summary": "2-3 sentence summary",
-  "marketImpact": "BULLISH/BEARISH/NEUTRAL"
-}`
+The response must be EXACTLY in this format, with no text before or after:
+[
+  {
+    "title": "Article title",
+    "url": "Full URL",
+    "source": "Publication name",
+    "publishDate": "YYYY-MM-DD",
+    "relevanceScore": 0.0-1.0,
+    "summary": "2-3 sentence summary",
+    "marketImpact": "BULLISH/BEARISH/NEUTRAL"
+  }
+]`
         },
         {
           role: "user",
@@ -174,7 +176,7 @@ Focus on articles from the last 30 days that could impact the market outcome.`
         }
       ],
       temperature: 0.1,
-      max_tokens: 1000,
+      max_tokens: 4000,
       response_format: { type: "json_object" }
     });
 
@@ -188,21 +190,35 @@ Focus on articles from the last 30 days that could impact the market outcome.`
     console.log('Response content:', content);
 
     try {
-      // Essayer de trouver le début du JSON dans la réponse
-      const jsonStart = content.indexOf('[');
-      const jsonEnd = content.lastIndexOf(']') + 1;
-      if (jsonStart === -1 || jsonEnd === 0) {
-        console.error('No JSON array found in response');
-        return [];
+      // Nettoyer la réponse de tout texte superflu
+      let jsonContent = content.trim();
+      
+      // Si la réponse commence par du texte, trouver le début du JSON
+      const jsonStart = jsonContent.indexOf('[');
+      if (jsonStart !== -1) {
+        jsonContent = jsonContent.substring(jsonStart);
       }
       
-      const jsonContent = content.substring(jsonStart, jsonEnd);
+      // Si la réponse contient du texte après le JSON, le retirer
+      const jsonEnd = jsonContent.lastIndexOf(']');
+      if (jsonEnd !== -1) {
+        jsonContent = jsonContent.substring(0, jsonEnd + 1);
+      }
+
+      // Vérifier que nous avons un JSON valide
+      if (!jsonContent.startsWith('[') || !jsonContent.endsWith(']')) {
+        console.error('Invalid JSON format received:', jsonContent);
+        return [];
+      }
+
       const articles = JSON.parse(jsonContent);
       
       if (!Array.isArray(articles)) {
-        console.error('Invalid articles format received:', articles);
+        console.error('Response is not an array:', articles);
         return [];
       }
+
+      console.log('Successfully parsed articles:', articles.length);
 
       // Filtrer les articles non pertinents avec des seuils adaptés au type de marché
       const relevanceThreshold = market.title.toLowerCase().includes('oscar') || 

@@ -12,15 +12,11 @@ export function AnalysisCard({ analysis }: AnalysisCardProps) {
       <Card>
         <Title className="mb-4 text-lg font-bold text-blue-600">Analyse du marché</Title>
         <div className="space-y-4">
-          <div>
-            <Text className="font-semibold">Contexte du marché :</Text>
-            <Text className="mt-1">{analysis.marketContext}</Text>
-          </div>
-
+          {/* Termes clés */}
           <div>
             <Text className="font-semibold">Termes clés :</Text>
             <div className="flex flex-wrap gap-2 mt-1">
-              {analysis.keyTerms.map((term, index) => (
+              {analysis.bullishBearishAnalysis.bullishArguments.map((term, index) => (
                 <Badge key={index} color="blue">
                   {term}
                 </Badge>
@@ -28,10 +24,11 @@ export function AnalysisCard({ analysis }: AnalysisCardProps) {
             </div>
           </div>
 
+          {/* Insights */}
           <div>
             <Text className="font-semibold">Insights :</Text>
             <List className="mt-1">
-              {analysis.insights.map((insight, index) => (
+              {analysis.bullishBearishAnalysis.bearishArguments.map((insight, index) => (
                 <ListItem key={index}>{insight}</ListItem>
               ))}
             </List>
@@ -118,24 +115,12 @@ export function AnalysisCard({ analysis }: AnalysisCardProps) {
             </div>
           </div>
 
-          {/* Points de discussion clés */}
-          {analysis.socialMetrics.keyDiscussionPoints && (
-            <div>
-              <Text className="font-semibold">Points de discussion clés :</Text>
-              <List className="mt-2">
-                {analysis.socialMetrics.keyDiscussionPoints.map((point, index) => (
-                  <ListItem key={index}>{point}</ListItem>
-                ))}
-              </List>
-            </div>
-          )}
-
           {/* Posts Reddit */}
-          {analysis.socialMetrics.redditPosts && analysis.socialMetrics.redditPosts.length > 0 && (
+          {analysis.redditPosts && analysis.redditPosts.length > 0 && (
             <div>
               <Text className="font-semibold mb-2">Posts Reddit pertinents :</Text>
               <div className="space-y-4">
-                {analysis.socialMetrics.redditPosts.map((post, index) => (
+                {analysis.redditPosts.map((post, index) => (
                   <div key={index} className="p-4 border rounded-lg hover:bg-gray-50">
                     <div className="flex flex-col gap-2">
                       <Text className="font-medium text-lg">{post.title}</Text>
@@ -147,7 +132,7 @@ export function AnalysisCard({ analysis }: AnalysisCardProps) {
                         <Badge size="sm" color="orange">⬆️ {post.upvotes}</Badge>
                         <Badge 
                           size="sm" 
-                          color={post.sentiment === 'POSITIVE' ? 'green' : post.sentiment === 'NEGATIVE' ? 'red' : 'gray'}
+                          color={post.sentiment === 'BULLISH' ? 'green' : post.sentiment === 'BEARISH' ? 'red' : 'gray'}
                         >
                           {post.sentiment}
                         </Badge>

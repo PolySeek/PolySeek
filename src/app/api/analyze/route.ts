@@ -440,46 +440,88 @@ async function generateBullishBearishAnalysis(market: Market, articles: RelatedA
       messages: [
         {
           role: "system",
-          content: `Analyze this market and provide a concise analysis in JSON format.`
+          content: `You are a JSON generator. Return ONLY a JSON object with this exact structure, no other text:
+{
+  "bullishArguments": ["string", "string"],
+  "bearishArguments": ["string", "string"],
+  "confidence": "HIGH" | "MEDIUM" | "LOW",
+  "whatIfScenarios": {
+    "positiveScenario": {
+      "title": "string",
+      "implications": ["string"],
+      "probability": number
+    },
+    "negativeScenario": {
+      "title": "string",
+      "implications": ["string"],
+      "probability": number
+    }
+  }
+}`
         },
         {
           role: "user",
-          content: `Market: ${market.title}\nDescription: ${market.description}`
+          content: `Analyze this market and return a JSON object:
+Title: ${market.title}
+Description: ${market.description}
+Articles: ${articles.map(a => a.title).join(', ')}
+Reddit: ${redditPosts.map(p => p.title).join(', ')}`
         }
       ],
-      temperature: 0.3,
+      temperature: 0.1, // Réduire la température pour plus de cohérence
       max_tokens: 1000,
       response_format: { type: "json_object" }
     });
 
-    const analysis = JSON.parse(response.choices[0]?.message?.content || '{}');
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error('Empty response from API');
+    }
+
+    console.log('Raw analysis response:', content);
+
+    // Essayer de trouver et parser le JSON même s'il y a du texte autour
+    let jsonContent = content;
+    const jsonStart = content.indexOf('{');
+    const jsonEnd = content.lastIndexOf('}') + 1;
     
-    return {
-      bullishArguments: analysis.bullishArguments || [
-        "Recent developments support a YES outcome",
-        "Historical data suggests favorable conditions"
-      ],
-      bearishArguments: analysis.bearishArguments || [
-        "Some uncertainty remains in the market",
-        "Potential challenges could affect the outcome"
-      ],
-      confidence: analysis.confidence || 'MEDIUM',
-      lastUpdated: new Date().toISOString(),
-      whatIfScenarios: {
-        positiveScenario: {
-          title: "If YES wins...",
-          implications: ["Market confidence will increase"],
-          probability: 0.5
-        },
-        negativeScenario: {
-          title: "If NO wins...",
-          implications: ["Market uncertainty may rise"],
-          probability: 0.5
-        }
+    if (jsonStart !== -1 && jsonEnd > jsonStart) {
+      jsonContent = content.substring(jsonStart, jsonEnd);
+    }
+
+    try {
+      const analysis = JSON.parse(jsonContent);
+      
+      // Valider la structure
+      if (!analysis.bullishArguments || !analysis.bearishArguments) {
+        throw new Error('Invalid analysis structure');
       }
-    };
+
+      return {
+        bullishArguments: analysis.bullishArguments,
+        bearishArguments: analysis.bearishArguments,
+        confidence: analysis.confidence || 'MEDIUM',
+        lastUpdated: new Date().toISOString(),
+        whatIfScenarios: analysis.whatIfScenarios || {
+          positiveScenario: {
+            title: "If YES wins...",
+            implications: ["Market confidence will increase"],
+            probability: 0.5
+          },
+          negativeScenario: {
+            title: "If NO wins...",
+            implications: ["Market uncertainty may rise"],
+            probability: 0.5
+          }
+        }
+      };
+    } catch (parseError) {
+      console.error('Error parsing analysis:', parseError, 'Content:', jsonContent);
+      throw new Error('Failed to parse analysis response');
+    }
   } catch (error) {
     console.error('Error generating analysis:', error);
+    // Retourner une analyse par défaut en cas d'erreur
     return {
       bullishArguments: ["Recent developments support a YES outcome"],
       bearishArguments: ["Some uncertainty remains in the market"],

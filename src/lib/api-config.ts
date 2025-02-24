@@ -6,12 +6,12 @@ export const API_CONFIG = {
     },
   },
   AI_SERVICE: {
-    BASE_URL: 'https://api.zukijourney.com/v1',
-    API_KEY: process.env.NEXT_PUBLIC_ZUKI_API_KEY || '',
+    BASE_URL: process.env.NEXT_PUBLIC_ANALYSIS_SERVICE_URL || 'https://api.zukijourney.com/v1',
+    API_KEY: process.env.NEXT_PUBLIC_ANALYSIS_SERVICE_KEY || process.env.NEXT_PUBLIC_ZUKI_API_KEY || '',
   },
   MARKET_ANALYSIS: {
-    BASE_URL: process.env.NEXT_PUBLIC_ANALYSIS_SERVICE_URL || '',
-    API_KEY: process.env.NEXT_PUBLIC_ANALYSIS_SERVICE_KEY || '',
+    BASE_URL: process.env.NEXT_PUBLIC_ANALYSIS_SERVICE_URL || 'https://api.zukijourney.com/v1',
+    API_KEY: process.env.NEXT_PUBLIC_ANALYSIS_SERVICE_KEY || process.env.NEXT_PUBLIC_ZUKI_API_KEY || '',
     ENDPOINTS: {
       SEARCH: '/search',
       SOCIAL: '/social'

@@ -230,10 +230,16 @@ Focus on last 30 days impact on market outcome.`
 
 async function fetchRedditPosts(market: Market) {
   try {
-    const response = await fetch(`${process.env.VERCEL_URL || 'http://localhost:3000'}/api/reddit?query=${encodeURIComponent(market.title)}&limit=10`);
+    const baseUrl = process.env.VERCEL_URL 
+      ? `https://${process.env.VERCEL_URL}` 
+      : 'http://localhost:3000';
+    
+    console.log('Fetching Reddit posts with base URL:', baseUrl);
+    
+    const response = await fetch(`${baseUrl}/api/reddit?query=${encodeURIComponent(market.title)}&limit=10`);
     
     if (!response.ok) {
-      throw new Error('Failed to fetch Reddit posts');
+      throw new Error(`Failed to fetch Reddit posts: ${response.status} ${response.statusText}`);
     }
 
     const data = await response.json();
@@ -242,6 +248,13 @@ async function fetchRedditPosts(market: Market) {
     return data.posts || [];
   } catch (error) {
     console.error('Error fetching Reddit posts:', error);
+    if (error instanceof Error) {
+      console.error('Error details:', {
+        message: error.message,
+        name: error.name,
+        stack: error.stack
+      });
+    }
     return [];
   }
 }

@@ -5,6 +5,12 @@ import { API_CONFIG } from '@/lib/api-config';
 import { RedditService } from '@/lib/services/reddit-service';
 import { MarketService } from '@/lib/services/market-service';
 
+// Augmenter la limite de temps à 60 secondes
+export const maxDuration = 60;
+
+// Configurer pour utiliser Edge Runtime
+export const runtime = 'edge';
+
 const openai = new OpenAI({
   baseURL: API_CONFIG.AI_SERVICE.BASE_URL,
   apiKey: API_CONFIG.AI_SERVICE.API_KEY,
@@ -13,7 +19,7 @@ const openai = new OpenAI({
     'Content-Type': 'application/json'
   },
   dangerouslyAllowBrowser: true,
-  timeout: 60000
+  timeout: 30000
 });
 
 interface Analysis {
@@ -168,7 +174,8 @@ Focus on articles from the last 30 days that could impact the market outcome.`
         }
       ],
       temperature: 0.1,
-      max_tokens: 2000
+      max_tokens: 1000,
+      response_format: { type: "json_object" }
     });
 
     console.log('API response received');
@@ -433,129 +440,63 @@ async function generateBullishBearishAnalysis(market: Market, articles: RelatedA
       messages: [
         {
           role: "system",
-          content: `You are a prediction market analyst. Analyze the market data, articles, and social discussions to provide:
-1. Balanced arguments for both YES and NO outcomes
-2. What-if scenarios exploring the implications of each outcome
-
-Focus on concrete facts and evidence. Each argument should be clear, concise, and directly related to the market resolution conditions.
-
-Return ONLY a JSON object with this structure (no other text):
-{
-  "bullishArguments": ["argument 1", "argument 2", "argument 3"],
-  "bearishArguments": ["argument 1", "argument 2", "argument 3"],
-  "confidence": "HIGH",
-  "whatIfScenarios": {
-    "positiveScenario": {
-      "title": "If YES wins...",
-      "implications": ["implication 1", "implication 2", "implication 3"],
-      "probability": 0.7
-    },
-    "negativeScenario": {
-      "title": "If NO wins...",
-      "implications": ["implication 1", "implication 2", "implication 3"],
-      "probability": 0.3
-    }
-  }
-}`
+          content: `Analyze this market and provide a concise analysis in JSON format.`
         },
         {
           role: "user",
-          content: `Analyze this market data and provide balanced YES/NO arguments and what-if scenarios:
-
-Market Question: ${market.title}
-Description: ${market.description}
-End Date: ${new Date(market.endDate).toLocaleDateString()}
-
-Related Articles:
-${articles.map(a => `- ${a.title} (${a.source}) - Impact: ${a.marketImpact}`).join('\n')}
-
-Reddit Discussions:
-${redditPosts.map(p => `- ${p.title} (r/${p.subreddit}) - Sentiment: ${p.sentiment}`).join('\n')}
-
-Provide:
-1. 3-5 strong arguments for each side, focusing on factual evidence
-2. Detailed implications for each scenario
-Do not consider current market probabilities in your analysis.`
+          content: `Market: ${market.title}\nDescription: ${market.description}`
         }
       ],
       temperature: 0.3,
-      max_tokens: 1500
+      max_tokens: 1000,
+      response_format: { type: "json_object" }
     });
 
     const analysis = JSON.parse(response.choices[0]?.message?.content || '{}');
     
-    // Ensure all required fields are present with default values if missing
-    const result = {
+    return {
       bullishArguments: analysis.bullishArguments || [
         "Recent developments support a YES outcome",
-        "Historical data suggests favorable conditions",
-        "Key indicators point to positive resolution"
+        "Historical data suggests favorable conditions"
       ],
       bearishArguments: analysis.bearishArguments || [
         "Some uncertainty remains in the market",
-        "Potential challenges could affect the outcome",
-        "Counter-indicators suggest caution"
+        "Potential challenges could affect the outcome"
       ],
       confidence: analysis.confidence || 'MEDIUM',
       lastUpdated: new Date().toISOString(),
       whatIfScenarios: {
         positiveScenario: {
-          title: analysis.whatIfScenarios?.positiveScenario?.title || "If YES wins...",
-          implications: analysis.whatIfScenarios?.positiveScenario?.implications || [
-            "Market confidence will increase",
-            "Trading volume likely to surge",
-            "Similar markets may see increased activity"
-          ],
+          title: "If YES wins...",
+          implications: ["Market confidence will increase"],
           probability: 0.5
         },
         negativeScenario: {
-          title: analysis.whatIfScenarios?.negativeScenario?.title || "If NO wins...",
-          implications: analysis.whatIfScenarios?.negativeScenario?.implications || [
-            "Market uncertainty may rise",
-            "Trading volume could decrease",
-            "Related markets might experience volatility"
-          ],
+          title: "If NO wins...",
+          implications: ["Market uncertainty may rise"],
           probability: 0.5
         }
       }
     };
-
-    return result;
   } catch (error) {
     console.error('Error generating analysis:', error);
     return {
-      bullishArguments: [
-        "Recent developments support a YES outcome",
-        "Historical data suggests favorable conditions",
-        "Key indicators point to positive resolution"
-      ],
-      bearishArguments: [
-        "Some uncertainty remains in the market",
-        "Potential challenges could affect the outcome",
-        "Counter-indicators suggest caution"
-      ],
+      bullishArguments: ["Recent developments support a YES outcome"],
+      bearishArguments: ["Some uncertainty remains in the market"],
       confidence: 'MEDIUM',
       lastUpdated: new Date().toISOString(),
       whatIfScenarios: {
         positiveScenario: {
           title: "If YES wins...",
-          implications: [
-            "Market confidence will increase",
-            "Trading volume likely to surge",
-            "Similar markets may see increased activity"
-          ],
+          implications: ["Market confidence will increase"],
           probability: 0.5
         },
         negativeScenario: {
           title: "If NO wins...",
-          implications: [
-            "Market uncertainty may rise",
-            "Trading volume could decrease",
-            "Related markets might experience volatility"
-          ],
+          implications: ["Market uncertainty may rise"],
           probability: 0.5
         }
       }
     };
   }
-} 
+}

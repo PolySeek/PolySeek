@@ -136,111 +136,49 @@ export async function POST(request: Request) {
 
 async function fetchRelatedArticles(market: Market) {
   try {
-    console.log('Starting article search...');
-    
-    // Déterminer le type de marché
-    const isBinaryMarket = market.outcomes.length === 2 && 
-      market.outcomes.every(o => ['YES', 'NO', 'yes', 'no'].includes(o.title.toLowerCase()));
-    
-    const isAwardsMarket = market.title.toLowerCase().includes('oscar') || 
-      market.title.toLowerCase().includes('award') ||
-      market.title.toLowerCase().includes('emmy') ||
-      market.title.toLowerCase().includes('grammy');
-
-    const isPoliticsMarket = market.title.toLowerCase().includes('trump') ||
-      market.title.toLowerCase().includes('biden') ||
-      market.title.toLowerCase().includes('congress') ||
-      market.title.toLowerCase().includes('election') ||
-      market.title.toLowerCase().includes('senate') ||
-      market.title.toLowerCase().includes('house');
-
-    // Adapter les instructions en fonction du type de marché
-    let systemPrompt = `You are a news search and analysis expert. Search for and analyze recent news articles related to this prediction market.
-
-Return ONLY a JSON array of articles with this structure (no other text):
-[{
-  "title": "Article title",
-  "url": "Full URL to the article",
-  "source": "Publication name",
-  "publishDate": "YYYY-MM-DD",
-  "relevanceScore": 0.0-1.0,
-  "summary": "2-3 sentences summarizing key points and their direct relevance to the market outcome",
-  "marketImpact": "BULLISH/BEARISH/NEUTRAL"
-}]
-
-Guidelines:
-1. Focus on high-quality sources (major news outlets, respected industry publications)
-2. Only include articles from the past 30 days
-3. Ensure each article has a direct connection to the market's resolution conditions
-4. Provide clear, factual summaries that explain why the article matters for this market
-5. Score relevance based on how directly the article impacts the market outcome
-6. Determine market impact based on objective analysis of the article's content`;
-
-    if (isAwardsMarket) {
-      systemPrompt += `\n\nFor Awards Markets:
-- Focus on industry publications (Variety, Hollywood Reporter, etc.)
-- Include articles about nominees' performances/campaigns
-- Track industry insider predictions and voting patterns
-- Consider precursor awards and historical trends`;
-    } else if (isPoliticsMarket) {
-      systemPrompt += `\n\nFor Political Markets:
-- Focus on major news outlets and political publications
-- Include polling data and expert analysis
-- Track relevant legislative developments
-- Consider historical precedents and political dynamics`;
-    } else if (isBinaryMarket) {
-      systemPrompt += `\n\nFor Binary (YES/NO) Markets:
-- Focus on direct evidence for/against the outcome
-- Include expert predictions and analysis
-- Track key milestones and deadlines
-- Consider similar historical events`;
-    } else {
-      systemPrompt += `\n\nFor Multiple Choice Markets:
-- Cover all possible outcomes equally
-- Track developments for each option
-- Include comparative analysis
-- Consider market-specific factors and trends`;
-    }
-
-    console.log('Market type:', {
-      isBinary: isBinaryMarket,
-      isAwards: isAwardsMarket,
-      isPolitics: isPoliticsMarket,
-      outcomes: market.outcomes.length
-    });
-
+    console.log('Making API call for articles...');
     const response = await openai.chat.completions.create({
       model: "sonar-pro",
       messages: [
         {
           role: "system",
-          content: systemPrompt
+          content: `You are a news search and analysis expert. Find and analyze recent news articles related to this prediction market question. Return your findings as a JSON array of articles.
+
+Format each article as:
+{
+  "title": "Article title",
+  "url": "Full URL",
+  "source": "Publication name",
+  "publishDate": "YYYY-MM-DD",
+  "relevanceScore": 0.0-1.0,
+  "summary": "2-3 sentence summary",
+  "marketImpact": "BULLISH/BEARISH/NEUTRAL"
+}`
         },
         {
           role: "user",
-          content: `Find recent news articles for this prediction market:
-Title: ${market.title}
+          content: `Find relevant articles for this market:
+"${market.title}"
+
 Description: ${market.description}
-Resolution Source: ${market.resolutionSource || 'Not specified'}
-End Date: ${new Date(market.endDate).toLocaleDateString()}
+Resolution: ${market.resolutionSource || 'Not specified'}
 Outcomes: ${market.outcomes.map(o => o.title).join(', ')}
 
-Return only articles that could meaningfully impact the market's outcome.
-For each article, explain specifically how it affects the probability of each outcome.`
+Focus on articles from the last 30 days that could impact the market outcome.`
         }
       ],
       temperature: 0.1,
-      max_tokens: 2000,
-      response_format: { type: "json_object" }
+      max_tokens: 2000
     });
 
+    console.log('API response received');
     const content = response.choices[0]?.message?.content;
     if (!content) {
       console.error('Empty response from API');
       return [];
     }
 
-    console.log('Raw content from API:', content);
+    console.log('Response content:', content);
 
     try {
       // Essayer de trouver le début du JSON dans la réponse
@@ -260,7 +198,10 @@ For each article, explain specifically how it affects the probability of each ou
       }
 
       // Filtrer les articles non pertinents avec des seuils adaptés au type de marché
-      const relevanceThreshold = isAwardsMarket || isPoliticsMarket ? 0.5 : 0.6;
+      const relevanceThreshold = market.title.toLowerCase().includes('oscar') || 
+        market.title.toLowerCase().includes('award') ||
+        market.title.toLowerCase().includes('emmy') ||
+        market.title.toLowerCase().includes('grammy') ? 0.5 : 0.6;
       const filteredArticles = articles.filter(article => 
         article.relevanceScore >= relevanceThreshold && // Score de pertinence minimum
         new Date(article.publishDate) >= new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) // 30 derniers jours
@@ -269,7 +210,10 @@ For each article, explain specifically how it affects the probability of each ou
       // Trier les articles par pertinence et date
       const sortedArticles = filteredArticles.sort((a, b) => {
         // Ajuster les poids en fonction du type de marché
-        const recencyWeight = isAwardsMarket ? 0.4 : 0.3;
+        const recencyWeight = market.title.toLowerCase().includes('oscar') || 
+          market.title.toLowerCase().includes('award') ||
+          market.title.toLowerCase().includes('emmy') ||
+          market.title.toLowerCase().includes('grammy') ? 0.4 : 0.3;
         const relevanceWeight = 1 - recencyWeight;
 
         const aScore = a.relevanceScore * relevanceWeight + 

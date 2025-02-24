@@ -19,7 +19,7 @@ const openai = new OpenAI({
     'Content-Type': 'application/json'
   },
   dangerouslyAllowBrowser: true,
-  timeout: 25000 // Réduire le timeout à 25 secondes
+  timeout: 20000 // Réduire encore le timeout
 });
 
 interface Analysis {
